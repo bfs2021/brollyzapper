@@ -157,8 +157,8 @@ func (g *Guard) InterceptRequest(ctx context.Context, in lnd.Interception) error
 			refusal = fmt.Sprintf("the guard is holding %d payment attempts for this window "+
 				"and will not lose one to record another", len(kept))
 		case used+cost > st.MaxSpendMsat:
-			refusal = fmt.Sprintf("this payment would take the last %s to %s, over the "+
-				"limit of %s", SpendWindow, satsText(used+cost), satsText(st.MaxSpendMsat))
+			refusal = fmt.Sprintf("this payment would take the last %d hours to %s, over the "+
+				"limit of %s", int(SpendWindow/time.Hour), satsText(used+cost), satsText(st.MaxSpendMsat))
 		default:
 			st.SpendAttempts = append(kept, SpendAttempt{
 				Key:  g.attemptKey(in),

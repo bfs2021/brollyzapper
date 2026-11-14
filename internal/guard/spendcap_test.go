@@ -54,7 +54,7 @@ func TestAPaymentOverTheWindowIsRefusedInsideLNDsRequestPath(t *testing.T) {
 	}
 	// In sats, like every amount a person reads (§9, as0.12): this text reaches
 	// the payer and, through the audit row, the Security page.
-	if !strings.Contains(second.GetError(), "over the limit of 10 sats") {
+	if !strings.Contains(second.GetError(), "the last 24 hours to 12 sats, over the limit of 10 sats") {
 		t.Errorf("the refusal %q does not name the limit it hit in sats; the person who asked "+
 			"for the payment reads this text", second.GetError())
 	}
