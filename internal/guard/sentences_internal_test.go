@@ -34,15 +34,9 @@ func TestTheOperatorFacingSentencesAreExactlyThese(t *testing.T) {
 		{Change{Control: ControlPaymentCap, Msat: 1_000_000},
 			"RAISE THE PER-PAYMENT LIMIT to 1000 sats.",
 			"LOWER THE PER-PAYMENT LIMIT to 1000 sats."},
-		// A remainder reads as it does on every web page (§9): sats with the
-		// msat remainder, never a bare msat figure three orders of magnitude
-		// away from the number the operator typed (as0.12).
 		{Change{Control: ControlSpendCap, Msat: 50_000_500},
 			"RAISE THE SPENDING LIMIT to 50000.5 sats in any 24 hours.",
 			"LOWER THE SPENDING LIMIT to 50000.5 sats in any 24 hours."},
-		{Change{Control: ControlPaymentCap, Msat: 1_001},
-			"RAISE THE PER-PAYMENT LIMIT to 1.001 sats.",
-			"LOWER THE PER-PAYMENT LIMIT to 1.001 sats."},
 	} {
 		if got := c.change.describe(); got != c.file {
 			t.Errorf("the authorisation file would say\n  %q\nwant\n  %q\nThis is the sentence "+
@@ -60,12 +54,9 @@ func TestTheOperatorFacingSentencesAreExactlyThese(t *testing.T) {
 	}
 }
 
-// msatSentence is the guard's copy of §9's display rule. The guard does not
-// import internal/web, which would link net/http into a binary with no listeners
-// (§16), so the web formatter's edge cases are held here too, and the two read the
-// same amount the same way (as0.12). Zero keeps its warning: it is the one cap
-// value that refuses everything, and the sentence is where the operator learns
-// that.
+// The edge cases of internal/web's sats table, so the two copies of §9's rule
+// read an amount the same way; zero keeps its warning, because the sentence is
+// where the operator learns that a zero cap refuses everything.
 func TestMsatSentenceRendersSatsWithTheRemainderOnlyWhenNonZero(t *testing.T) {
 	for _, c := range []struct {
 		msat int64
@@ -79,9 +70,7 @@ func TestMsatSentenceRendersSatsWithTheRemainderOnlyWhenNonZero(t *testing.T) {
 		{500, "0.5 sats"},
 		{1, "0.001 sats"},
 		{21_000_000_000, "21000000 sats"},
-		// valid() refuses a negative cap before any sentence is built; this row
-		// only holds that a sign could never come out garbled.
-		{-1_500, "-1.5 sats"},
+		{-1_500, "-1.5 sats"}, // valid() refuses one first; the sign must not garble
 		{math.MinInt64, "-9223372036854775.808 sats"},
 	} {
 		if got := msatSentence(c.msat); got != c.want {

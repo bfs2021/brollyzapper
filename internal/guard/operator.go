@@ -120,29 +120,25 @@ func (c Change) auditSentence(tightening bool) string {
 }
 
 // msatSentence renders msat for a person: whole sats, and the msat remainder
-// only when it is non-zero, trailing zeros trimmed — §9's rule, so a cap reads
-// "1.5 sats" here exactly as it does on every web page, and nothing is rounded.
+// only when it is non-zero, trailing zeros trimmed — §9's rule, so an amount
+// reads "1.5 sats" here exactly as it does on every web page (as0.12).
 //
-// It is the guard's own copy of internal/web's `sats` rather than a call to it:
-// internal/web imports net/http, which the guard must not link (it has no
-// listeners, §16), and the operator's sentence is one the server must not
-// compose. TestMsatSentenceRendersSatsWithTheRemainderOnlyWhenNonZero holds it
-// to the edge cases the web formatter's table covers (as0.12); before that, a
-// remainder read "150500 msat" beside "100 sats" in one refusal.
+// It is the guard's own copy of internal/web's `sats`, in the same shape, rather
+// than a call to it: internal/web imports net/http, which the guard must not
+// link (it has no listeners, §16), and the operator's sentence is one the server
+// must not compose.
 func msatSentence(msat int64) string {
 	if msat == 0 {
 		return "0 sats (which refuses every payment)"
 	}
-	// The magnitude as unsigned, so the sign is written once and even
-	// math.MinInt64 negates without overflowing. valid() refuses a negative cap
-	// before any sentence is built; this only keeps one from coming out garbled.
-	sign, u := "", uint64(msat)
+	q, r := msat/1000, msat%1000
+	sign := ""
 	if msat < 0 {
-		sign, u = "-", -u
+		sign, q, r = "-", -q, -r
 	}
-	s := strconv.FormatUint(u/1000, 10)
-	if rem := u % 1000; rem != 0 {
-		s += strings.TrimRight(fmt.Sprintf(".%03d", rem), "0")
+	s := strconv.FormatInt(q, 10)
+	if r != 0 {
+		s += strings.TrimRight(fmt.Sprintf(".%03d", r), "0")
 	}
 	return sign + s + " sats"
 }
