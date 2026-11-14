@@ -1,6 +1,9 @@
 package guard
 
-import "testing"
+import (
+	"math"
+	"testing"
+)
 
 // The operator's sentences, written out, because nothing else pins them.
 //
@@ -31,6 +34,15 @@ func TestTheOperatorFacingSentencesAreExactlyThese(t *testing.T) {
 		{Change{Control: ControlPaymentCap, Msat: 1_000_000},
 			"RAISE THE PER-PAYMENT LIMIT to 1000 sats.",
 			"LOWER THE PER-PAYMENT LIMIT to 1000 sats."},
+		// A remainder reads as it does on every web page (§9): sats with the
+		// msat remainder, never a bare msat figure three orders of magnitude
+		// away from the number the operator typed (as0.12).
+		{Change{Control: ControlSpendCap, Msat: 50_000_500},
+			"RAISE THE SPENDING LIMIT to 50000.5 sats in any 24 hours.",
+			"LOWER THE SPENDING LIMIT to 50000.5 sats in any 24 hours."},
+		{Change{Control: ControlPaymentCap, Msat: 1_001},
+			"RAISE THE PER-PAYMENT LIMIT to 1.001 sats.",
+			"LOWER THE PER-PAYMENT LIMIT to 1.001 sats."},
 	} {
 		if got := c.change.describe(); got != c.file {
 			t.Errorf("the authorisation file would say\n  %q\nwant\n  %q\nThis is the sentence "+
@@ -44,6 +56,36 @@ func TestTheOperatorFacingSentencesAreExactlyThese(t *testing.T) {
 		}
 		if got := c.change.auditSentence(true); got != c.lowered {
 			t.Errorf("the trail says\n  %q\nfor a lowering, want\n  %q", got, c.lowered)
+		}
+	}
+}
+
+// msatSentence is the guard's copy of §9's display rule. The guard does not
+// import internal/web, which would link net/http into a binary with no listeners
+// (§16), so the web formatter's edge cases are held here too, and the two read the
+// same amount the same way (as0.12). Zero keeps its warning: it is the one cap
+// value that refuses everything, and the sentence is where the operator learns
+// that.
+func TestMsatSentenceRendersSatsWithTheRemainderOnlyWhenNonZero(t *testing.T) {
+	for _, c := range []struct {
+		msat int64
+		want string
+	}{
+		{0, "0 sats (which refuses every payment)"},
+		{1_000, "1 sats"},
+		{1_500, "1.5 sats"},
+		{1_001, "1.001 sats"},
+		{1_010, "1.01 sats"},
+		{500, "0.5 sats"},
+		{1, "0.001 sats"},
+		{21_000_000_000, "21000000 sats"},
+		// valid() refuses a negative cap before any sentence is built; this row
+		// only holds that a sign could never come out garbled.
+		{-1_500, "-1.5 sats"},
+		{math.MinInt64, "-9223372036854775.808 sats"},
+	} {
+		if got := msatSentence(c.msat); got != c.want {
+			t.Errorf("msatSentence(%d) = %q, want %q", c.msat, got, c.want)
 		}
 	}
 }
