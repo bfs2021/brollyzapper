@@ -119,18 +119,27 @@ func (c Change) auditSentence(tightening bool) string {
 	return c.sentence("RAISE")
 }
 
-// msatSentence renders msat for a person: whole sats, and the msat remainder
-// only when it is non-zero, trailing zeros trimmed — §9's rule, so an amount
-// reads "1.5 sats" here exactly as it does on every web page (as0.12).
-//
-// It is the guard's own copy of internal/web's `sats`, in the same shape, rather
-// than a call to it: internal/web imports net/http, which the guard must not
-// link (it has no listeners, §16), and the operator's sentence is one the server
-// must not compose.
+// msatSentence renders the value a CHANGE sets a cap to, in the sentence the
+// operator authorises: the amount, and for zero the warning that a zero cap
+// refuses everything, which is where they learn it. Refusals name limits and
+// costs through satsText, without the warning.
 func msatSentence(msat int64) string {
 	if msat == 0 {
 		return "0 sats (which refuses every payment)"
 	}
+	return satsText(msat)
+}
+
+// satsText renders msat for a person: whole sats, and the msat remainder only
+// when it is non-zero, trailing zeros trimmed — §9's rule, so an amount reads
+// "1.5 sats" here exactly as it does on every web page (as0.12).
+//
+// It is the guard's own copy of internal/web's `sats` rather than a call to it:
+// internal/web imports net/http, which the guard must not link (it has no
+// listeners, §16), and the operator's sentence is one the server must not
+// compose. A negative amount is never expected here; if one arrives, the sign
+// is written once rather than garbled.
+func satsText(msat int64) string {
 	q, r := msat/1000, msat%1000
 	sign := ""
 	if msat < 0 {
@@ -578,7 +587,7 @@ func (g *Guard) checkCapPair(state State, change Change) error {
 		return &Refusal{Kind: KindCapPair, Err: fmt.Errorf(
 			"guard: a per-payment limit of %s is above the 24-hour limit of %s, "+
 				"so it could never be reached; %s",
-			msatSentence(payment), msatSentence(window), remedy)}
+			satsText(payment), satsText(window), remedy)}
 	}
 	return nil
 }

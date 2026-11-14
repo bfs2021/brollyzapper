@@ -157,6 +157,23 @@ func TestASinglePaymentOverThePerPaymentCapIsRefused(t *testing.T) {
 	}
 }
 
+// A zero per-payment cap refuses everything, and the refusal names it as a plain
+// "0 sats". The "(which refuses every payment)" warning belongs to the sentence
+// that SETS a cap; inside a refusal it would be read by the payer, mid-sentence,
+// about a limit that has already refused them (as0.12 review).
+func TestAZeroCapRefusalNamesTheLimitPlainly(t *testing.T) {
+	node := lndtest.Start(t)
+	d := guardDirs(t, node)
+	g := openGuardWithCaps(t, node, d, caps{window: 100_000_000, payment: 0})
+	serveMiddleware(t, node, g)
+
+	got := attempt(t, node, 1, invoiceFor(t, node, "any", 9_000)).GetError()
+	if !strings.Contains(got, "over the per-payment limit of 0 sats") ||
+		strings.Contains(got, "which refuses every payment") {
+		t.Errorf("the refusal reads %q; want the zero limit named plainly as 0 sats", got)
+	}
+}
+
 // Past the audit bound, a refused payment must cost no disk write at all.
 //
 // A refusal writes at most once, and deliberately: the guard.reject row is

@@ -54,27 +54,39 @@ func TestTheOperatorFacingSentencesAreExactlyThese(t *testing.T) {
 	}
 }
 
-// The edge cases of internal/web's sats table, so the two copies of §9's rule
-// read an amount the same way; zero keeps its warning, because the sentence is
-// where the operator learns that a zero cap refuses everything.
-func TestMsatSentenceRendersSatsWithTheRemainderOnlyWhenNonZero(t *testing.T) {
+// satsText carries internal/web's sats table row for row, so the two copies of
+// §9's rule read an amount the same way — the negative sub-sat rows included,
+// since msat/1000 alone loses the sign of -500.
+func TestSatsTextMatchesTheWebFormattersTable(t *testing.T) {
 	for _, c := range []struct {
 		msat int64
 		want string
 	}{
-		{0, "0 sats (which refuses every payment)"},
+		{0, "0 sats"},
 		{1_000, "1 sats"},
 		{1_500, "1.5 sats"},
 		{1_001, "1.001 sats"},
-		{1_010, "1.01 sats"},
-		{500, "0.5 sats"},
-		{1, "0.001 sats"},
 		{21_000_000_000, "21000000 sats"},
-		{-1_500, "-1.5 sats"}, // valid() refuses one first; the sign must not garble
+		{-1_500, "-1.5 sats"},
+		{-500, "-0.5 sats"},
+		{1_010, "1.01 sats"},
+		{10, "0.01 sats"},
+		{-1, "-0.001 sats"},
 		{math.MinInt64, "-9223372036854775.808 sats"},
 	} {
-		if got := msatSentence(c.msat); got != c.want {
-			t.Errorf("msatSentence(%d) = %q, want %q", c.msat, got, c.want)
+		if got := satsText(c.msat); got != c.want {
+			t.Errorf("satsText(%d) = %q, want %q", c.msat, got, c.want)
 		}
+	}
+}
+
+// A CAP of zero says what it does, because the operator's sentence is where they
+// learn it; any other cap reads exactly as satsText does.
+func TestMsatSentenceWarnsOnlyForAZeroCap(t *testing.T) {
+	if got, want := msatSentence(0), "0 sats (which refuses every payment)"; got != want {
+		t.Errorf("msatSentence(0) = %q, want %q", got, want)
+	}
+	if got, want := msatSentence(1_500), satsText(1_500); got != want {
+		t.Errorf("msatSentence(1500) = %q, want satsText's %q", got, want)
 	}
 }

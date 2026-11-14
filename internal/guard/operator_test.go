@@ -522,6 +522,14 @@ func TestTheCapPairRefusalNamesTheControlTheOperatorIsNotEditing(t *testing.T) {
 		want:    "a per-payment limit of 150.5 sats is above the 24-hour limit of 100 sats, so it could never be reached; raise the 24-hour limit first",
 		notWant: "msat",
 		fixture: caps{window: 100_000, payment: 50_000},
+	}, {
+		// A ZERO window is named plainly in the refusal; the zero-cap warning
+		// belongs to the sentence that sets a cap, not to one refusing a change.
+		name:    "lowering the 24-hour window to zero below the per-payment cap",
+		change:  guard.Change{Control: guard.ControlSpendCap, Msat: 0},
+		want:    "a per-payment limit of 50 sats is above the 24-hour limit of 0 sats, so it could never be reached; lower the per-payment limit first",
+		notWant: "which refuses every payment",
+		fixture: caps{window: 100_000, payment: 50_000},
 	}} {
 		t.Run(tc.name, func(t *testing.T) {
 			node := lndtest.Start(t)
