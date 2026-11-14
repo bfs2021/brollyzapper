@@ -52,9 +52,11 @@ func TestAPaymentOverTheWindowIsRefusedInsideLNDsRequestPath(t *testing.T) {
 		t.Fatal("a payment taking the window to 12 000 msat over a 10 000 msat limit was " +
 			"allowed; the hard cap is what bounds a compromised server to one window's spend")
 	}
-	if !strings.Contains(second.GetError(), "10000") {
-		t.Errorf("the refusal %q does not name the limit it hit; the person who asked for the "+
-			"payment reads this text", second.GetError())
+	// In sats, like every amount a person reads (§9, as0.12): this text reaches
+	// the payer and, through the audit row, the Security page.
+	if !strings.Contains(second.GetError(), "over the limit of 10 sats") {
+		t.Errorf("the refusal %q does not name the limit it hit in sats; the person who asked "+
+			"for the payment reads this text", second.GetError())
 	}
 }
 
@@ -775,6 +777,17 @@ func TestARefusedPaymentIsAudited(t *testing.T) {
 	if !strings.Contains(event.Attrs["reason"], "limit") {
 		t.Errorf("the event's reason is %q; it does not say which limit stopped the payment",
 			event.Attrs["reason"])
+	}
+	// The reason is rendered on the Security page's events table, so it reads in
+	// sats like the rest of the page (§9, as0.12). The machine-readable amount
+	// stays msat, in its own attribute.
+	if reason := event.Attrs["reason"]; !strings.Contains(reason, "per-payment limit of 1 sats") ||
+		strings.Contains(reason, " msat") {
+		t.Errorf("the event's reason is %q; want the per-payment limit in sats, no msat figure",
+			reason)
+	}
+	if event.Attrs["msat"] == "" {
+		t.Error("the event lost its machine-readable msat attribute")
 	}
 }
 
