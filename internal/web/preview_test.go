@@ -3,6 +3,7 @@ package web_test
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -48,16 +49,38 @@ func TestEveryPageRendersWithAFullFixture(t *testing.T) {
 // below finds the row the fixture built.
 const notCheckedTitle = "The node still honours the spend root key"
 
-func TestSecurityTablesUseHorizontalScrolling(t *testing.T) {
-	var b strings.Builder
-	if err := newRenderer(t).Render(&b, "security", fullFixture(time.Now().UTC())); err != nil {
-		t.Fatal(err)
-	}
-	for _, heading := range []string{"Checks", "Security events"} {
-		_, table, found := strings.Cut(b.String(), "<h2>"+heading+"</h2>")
-		if !found || !strings.HasPrefix(strings.TrimSpace(table), `<table class="security-table">`) {
-			t.Errorf("%s: expected the table to opt into horizontal scrolling", heading)
+// Every table in the admin UI scrolls inside a .table-scroll wrapper (0vk.17.5,
+// #114): overflow does not apply to a table box, so an unwrapped table wider
+// than a phone pushes the whole page sideways. It walks every page with the full
+// fixture rather than a list of headings, because the table that did push a
+// page sideways — the unresolvable payments, 937px at 390 — was the one no list
+// named. The closing count matters too: a lost </div> leaves the wrapper holding
+// the rest of the page and still opens correctly.
+func TestEveryTableScrollsInsideAWrapper(t *testing.T) {
+	table := regexp.MustCompile(`<table[\s>]`)
+	opened := regexp.MustCompile(`<div class="table-scroll">\s*<table[\s>]`)
+	closed := regexp.MustCompile(`</table>\s*</div>`)
+	now := time.Now().UTC()
+	r := newRenderer(t)
+	seen := 0
+	for _, page := range pages {
+		var b strings.Builder
+		if err := r.Render(&b, page, fullFixture(now)); err != nil {
+			t.Fatalf("%s: %v", page, err)
 		}
+		html := b.String()
+		n := len(table.FindAllStringIndex(html, -1))
+		o, c := len(opened.FindAllStringIndex(html, -1)), len(closed.FindAllStringIndex(html, -1))
+		if o != n || c != n {
+			t.Errorf("%s: %d tables, %d opened and %d closed inside a .table-scroll wrapper", page, n, o, c)
+		}
+		seen += n
+	}
+	// The full fixture renders four tables today: Checks, Security events, the
+	// unresolvable payments and the transactions. Fewer means the fixture stopped
+	// reaching one, and the walk above can no longer see it.
+	if seen < 4 {
+		t.Errorf("the full fixture rendered %d tables, want at least 4", seen)
 	}
 }
 
@@ -199,7 +222,9 @@ func galleryFixture(now time.Time) web.PageData {
 	d := fullFixture(now)
 	day := 24 * time.Hour
 
-	// Wallet: published receipts only, and the outgoing zap carries its payee.
+	// Wallet: no payment awaiting the operator's word, published receipts
+	// only, and the outgoing zap carries its payee.
+	d.Wallet.Unresolvable = nil
 	d.Wallet.Txns = []web.TxnRow{
 		{Kind: "zap", State: "settled", AmountMsat: 21_000, When: now.Add(-2 * time.Hour), Comment: "great post!", Receipt: "published", ReceiptID: "e3f1a9…"},
 		{Kind: "payment_out", State: "settled", AmountMsat: 5_000, FeeMsat: 12, When: now.Add(-5 * time.Hour), Payee: galleryPayee, Comment: "thanks for the guide"},
@@ -251,6 +276,14 @@ func fullFixture(now time.Time) web.PageData {
 		{Kind: "invoice_in", State: "expired", AmountMsat: 3_000, When: now},
 		{Kind: "payment_out", State: "failed", AmountMsat: 12_000, FeeMsat: 1_100, When: now, Note: "manual allocation"},
 	}
+	// A payment the resolver gave up on. Without it the widest table in the UI
+	// — a 64-hex hash that cannot wrap, and two buttons — was never rendered,
+	// so no preview could show it pushing a phone page sideways.
+	d.Wallet.Unresolvable = []web.UnresolvableRow{{
+		ID: 7, PaymentHash: strings.Repeat("9f", 32), AmountMsat: 26_100,
+		Reason: "the node has no record of this payment",
+		When:   "2026-11-14 09:12 UTC", DispatchedAt: "2026-11-14 09:12 UTC",
+	}}
 	d.Sending.Enabled = true
 	d.Sending.Ready = true
 	d.Sending.Permitted = true

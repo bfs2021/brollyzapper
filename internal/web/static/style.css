@@ -131,13 +131,14 @@ th, td { text-align: left; padding: .25rem .5rem; border-bottom: 1px solid var(-
    selector on .degraded, which is the system's state rather than a step the
    operator is in the middle of — the two share a look, not a meaning. */
 .notice { background: var(--raised); border-left: 4px solid var(--caution); padding: var(--gap); }
-/* display: block, because overflow does not apply to a table box and the rule
-   without it computes to `visible` and does nothing. Measured on a 390px
-   viewport with a 120-character unbreakable comment: without this the PAGE
-   scrolls sideways to 1266px, which is Wave 26's finding again; with it the
-   table scrolls and the page does not. Phone LAYOUT is 0vk.17's other thread —
-   this is the rule the plan already asked for, in the form that applies. */
-.txns, .security-table { display: block; overflow-x: auto; }
+/* Every table sits in a .table-scroll wrapper, because overflow does not apply
+   to a table box. Making the table itself a block (0vk.17.5) does scroll, but it
+   sizes the rows to their content: measured at 1200px, Security events and
+   Transactions stopped at 689px and 771px of an 832px column. Wrapped, every
+   row is 832px, and at 390px the table scrolls while the page stays 390px —
+   including the unresolvable-payments table, whose unbreakable 64-hex hash made
+   the wallet page 937px wide before it was wrapped. */
+.table-scroll { overflow-x: auto; }
 .amount { color: var(--amount); font-variant-numeric: tabular-nums; font-weight: 600; }
 /* A qualifier on the amount, not its peer. */
 .fee { color: var(--muted); font-size: .85rem; font-variant-numeric: tabular-nums; }
