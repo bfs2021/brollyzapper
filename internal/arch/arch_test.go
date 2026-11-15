@@ -441,9 +441,18 @@ func TestOnlyAPIWebAndCmdImportNetHTTP(t *testing.T) {
 // §16: "the guard writes to nothing the server owns", "do not let the guard
 // read the server's database for the spend counter"). Both are the same kind of
 // rule, so they are one table rather than one test each.
+//
+// It reads DIRECT imports, so a package that would bring net/http in with it is
+// named here as well: internal/web and internal/api are the server's HTTP layer,
+// and importing either — say, to reuse the sats formatter — passed this rule
+// until as0.12. A transitive net/http ban is not available: the guard's gRPC
+// client already links net/http, and §16's "no listeners" is held by
+// checkGuardListensOnNoNetworkSocket below.
 func checkGuardImports(pkgs map[string]*pkg) []problem {
 	forbidden := map[string]string{
 		"net/http":           "the guard has no listeners (spec §16)",
+		"internal/web":       "the guard does not link the server's HTTP layer (spec §3, §16)",
+		"internal/api":       "the guard does not link the server's HTTP layer (spec §3, §16)",
 		"internal/store":     "the guard keeps its own store and never reads the server's (spec §12, §16)",
 		"database/sql":       "the guard has no database of the server's kind (spec §16)",
 		"modernc.org/sqlite": "the guard has no database of the server's kind (spec §16)",
@@ -473,6 +482,15 @@ func TestGuardImportsNothingItMustNotSee(t *testing.T) {
 		"internal/guard":  {dir: "internal/guard", imports: []string{"net/http"}},
 		"cmd/brollyguard": {dir: "cmd/brollyguard"},
 	}), "no listeners")
+	// The server's HTTP layer, by its module path, from either guard package.
+	catches(t, checkGuardImports(map[string]*pkg{
+		"internal/guard":  {dir: "internal/guard", imports: []string{"github.com/davotoula/brollyzapper/internal/web"}},
+		"cmd/brollyguard": {dir: "cmd/brollyguard"},
+	}), "server's HTTP layer")
+	catches(t, checkGuardImports(map[string]*pkg{
+		"internal/guard":  {dir: "internal/guard"},
+		"cmd/brollyguard": {dir: "cmd/brollyguard", imports: []string{"github.com/davotoula/brollyzapper/internal/api"}},
+	}), "server's HTTP layer")
 }
 
 // Spec §3 and §6: the guard listens on a unix domain socket in the shared

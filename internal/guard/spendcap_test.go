@@ -52,9 +52,11 @@ func TestAPaymentOverTheWindowIsRefusedInsideLNDsRequestPath(t *testing.T) {
 		t.Fatal("a payment taking the window to 12 000 msat over a 10 000 msat limit was " +
 			"allowed; the hard cap is what bounds a compromised server to one window's spend")
 	}
-	if !strings.Contains(second.GetError(), "10000") {
-		t.Errorf("the refusal %q does not name the limit it hit; the person who asked for the "+
-			"payment reads this text", second.GetError())
+	// In sats, like every amount a person reads (§9, as0.12): this text reaches
+	// the payer and, through the audit row, the Security page.
+	if !strings.Contains(second.GetError(), "the last 24 hours to 12 sats, over the limit of 10 sats") {
+		t.Errorf("the refusal %q does not name the limit it hit in sats; the person who asked "+
+			"for the payment reads this text", second.GetError())
 	}
 }
 
@@ -152,6 +154,23 @@ func TestASinglePaymentOverThePerPaymentCapIsRefused(t *testing.T) {
 	if status.SpendUsedMsat != 0 {
 		t.Errorf("the window holds %d msat after a REFUSED payment; a refusal is not a spend",
 			status.SpendUsedMsat)
+	}
+}
+
+// A zero per-payment cap refuses everything, and the refusal names it as a plain
+// "0 sats". The "(which refuses every payment)" warning belongs to the sentence
+// that SETS a cap; inside a refusal it would be read by the payer, mid-sentence,
+// about a limit that has already refused them (as0.12 review).
+func TestAZeroCapRefusalNamesTheLimitPlainly(t *testing.T) {
+	node := lndtest.Start(t)
+	d := guardDirs(t, node)
+	g := openGuardWithCaps(t, node, d, caps{window: 100_000_000, payment: 0})
+	serveMiddleware(t, node, g)
+
+	got := attempt(t, node, 1, invoiceFor(t, node, "any", 9_000)).GetError()
+	if !strings.Contains(got, "over the per-payment limit of 0 sats") ||
+		strings.Contains(got, "which refuses every payment") {
+		t.Errorf("the refusal reads %q; want the zero limit named plainly as 0 sats", got)
 	}
 }
 
@@ -775,6 +794,17 @@ func TestARefusedPaymentIsAudited(t *testing.T) {
 	if !strings.Contains(event.Attrs["reason"], "limit") {
 		t.Errorf("the event's reason is %q; it does not say which limit stopped the payment",
 			event.Attrs["reason"])
+	}
+	// The reason is rendered on the Security page's events table, so it reads in
+	// sats like the rest of the page (§9, as0.12). The machine-readable amount
+	// stays msat, in its own attribute.
+	if reason := event.Attrs["reason"]; !strings.Contains(reason, "per-payment limit of 1 sats") ||
+		strings.Contains(reason, " msat") {
+		t.Errorf("the event's reason is %q; want the per-payment limit in sats, no msat figure",
+			reason)
+	}
+	if event.Attrs["msat"] == "" {
+		t.Error("the event lost its machine-readable msat attribute")
 	}
 }
 

@@ -1,6 +1,9 @@
 package guard
 
-import "testing"
+import (
+	"math"
+	"testing"
+)
 
 // The operator's sentences, written out, because nothing else pins them.
 //
@@ -31,6 +34,9 @@ func TestTheOperatorFacingSentencesAreExactlyThese(t *testing.T) {
 		{Change{Control: ControlPaymentCap, Msat: 1_000_000},
 			"RAISE THE PER-PAYMENT LIMIT to 1000 sats.",
 			"LOWER THE PER-PAYMENT LIMIT to 1000 sats."},
+		{Change{Control: ControlSpendCap, Msat: 50_000_500},
+			"RAISE THE SPENDING LIMIT to 50000.5 sats in any 24 hours.",
+			"LOWER THE SPENDING LIMIT to 50000.5 sats in any 24 hours."},
 	} {
 		if got := c.change.describe(); got != c.file {
 			t.Errorf("the authorisation file would say\n  %q\nwant\n  %q\nThis is the sentence "+
@@ -45,5 +51,42 @@ func TestTheOperatorFacingSentencesAreExactlyThese(t *testing.T) {
 		if got := c.change.auditSentence(true); got != c.lowered {
 			t.Errorf("the trail says\n  %q\nfor a lowering, want\n  %q", got, c.lowered)
 		}
+	}
+}
+
+// satsText carries internal/web's sats table row for row, so the two copies of
+// §9's rule read an amount the same way — the negative sub-sat rows included,
+// since msat/1000 alone loses the sign of -500.
+func TestSatsTextMatchesTheWebFormattersTable(t *testing.T) {
+	for _, c := range []struct {
+		msat int64
+		want string
+	}{
+		{0, "0 sats"},
+		{1_000, "1 sats"},
+		{1_500, "1.5 sats"},
+		{1_001, "1.001 sats"},
+		{21_000_000_000, "21000000 sats"},
+		{-1_500, "-1.5 sats"},
+		{-500, "-0.5 sats"},
+		{1_010, "1.01 sats"},
+		{10, "0.01 sats"},
+		{-1, "-0.001 sats"},
+		{math.MinInt64, "-9223372036854775.808 sats"},
+	} {
+		if got := satsText(c.msat); got != c.want {
+			t.Errorf("satsText(%d) = %q, want %q", c.msat, got, c.want)
+		}
+	}
+}
+
+// A CAP of zero says what it does, because the operator's sentence is where they
+// learn it; any other cap reads exactly as satsText does.
+func TestMsatSentenceWarnsOnlyForAZeroCap(t *testing.T) {
+	if got, want := msatSentence(0), "0 sats (which refuses every payment)"; got != want {
+		t.Errorf("msatSentence(0) = %q, want %q", got, want)
+	}
+	if got, want := msatSentence(1_500), satsText(1_500); got != want {
+		t.Errorf("msatSentence(1500) = %q, want satsText's %q", got, want)
 	}
 }

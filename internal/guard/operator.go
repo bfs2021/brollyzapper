@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
+	"strings"
 
 	"github.com/davotoula/brollyzapper/internal/logging"
 )
@@ -118,20 +119,37 @@ func (c Change) auditSentence(tightening bool) string {
 	return c.sentence("RAISE")
 }
 
-// msatSentence renders msat for a person, in whole sats where it divides.
-//
-// §9 says amounts display as whole sats and the msat remainder only when it is
-// non-zero. A cap is set in msat and will almost always be a round number of
-// sats; printing "100000.000" in the one sentence the operator must read
-// carefully is noise where it can least afford it.
+// msatSentence renders the value a CHANGE sets a cap to, in the sentence the
+// operator authorises: the amount, and for zero the warning that a zero cap
+// refuses everything, which is where they learn it. Refusals name limits and
+// costs through satsText, without the warning.
 func msatSentence(msat int64) string {
 	if msat == 0 {
 		return "0 sats (which refuses every payment)"
 	}
-	if msat%1000 == 0 {
-		return strconv.FormatInt(msat/1000, 10) + " sats"
+	return satsText(msat)
+}
+
+// satsText renders msat for a person: whole sats, and the msat remainder only
+// when it is non-zero, trailing zeros trimmed — §9's rule, so an amount reads
+// "1.5 sats" here exactly as it does on every web page (as0.12).
+//
+// It is the guard's own copy of internal/web's `sats` rather than a call to it:
+// internal/web imports net/http, which the guard must not link (it has no
+// listeners, §16), and the operator's sentence is one the server must not
+// compose. A negative amount is never expected here; if one arrives, the sign
+// is written once rather than garbled.
+func satsText(msat int64) string {
+	q, r := msat/1000, msat%1000
+	sign := ""
+	if msat < 0 {
+		sign, q, r = "-", -q, -r
 	}
-	return strconv.FormatInt(msat, 10) + " msat"
+	s := strconv.FormatInt(q, 10)
+	if r != 0 {
+		s += strings.TrimRight(fmt.Sprintf(".%03d", r), "0")
+	}
+	return sign + s + " sats"
 }
 
 // loosens reports whether applying c to this state moves in the direction a
@@ -569,7 +587,7 @@ func (g *Guard) checkCapPair(state State, change Change) error {
 		return &Refusal{Kind: KindCapPair, Err: fmt.Errorf(
 			"guard: a per-payment limit of %s is above the 24-hour limit of %s, "+
 				"so it could never be reached; %s",
-			msatSentence(payment), msatSentence(window), remedy)}
+			satsText(payment), satsText(window), remedy)}
 	}
 	return nil
 }
