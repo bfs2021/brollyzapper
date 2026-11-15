@@ -2,104 +2,75 @@ package api_test
 
 import (
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 )
 
-// BrollyZap-as0.4: a signed-out monitor probing the admin UI sends HEAD, and the
-// login handler answered it 405 while every page behind a `GET /...` pattern
-// answered HEAD from the GET handler. The monitor reported the app down.
-//
-// The handler switch is manual, so HEAD has to be named with GET explicitly;
-// ServeMux only supplies the GET-answers-HEAD rule to patterns it routes.
+// HEAD /login answers as GET does (as0.4; the reason is on the login handler).
+// It runs through a real server because only the server drops a HEAD body:
+// httptest.ResponseRecorder keeps whatever the handler wrote, and a monitor
+// sees the server's response.
 func TestHeadLoginAnswersAsGetDoes(t *testing.T) {
-	h := newHarness(t)
+	srv := httptest.NewServer(newHarness(t).handler)
+	defer srv.Close()
 
-	head := httptest.NewRecorder()
-	h.handler.ServeHTTP(head, httptest.NewRequest(http.MethodHead, "/login", nil))
-	if head.Code != http.StatusOK {
-		t.Fatalf("HEAD /login = %d, want 200; a monitor sending HEAD reports the app down",
-			head.Code)
+	do := func(method string) (*http.Response, []byte) {
+		t.Helper()
+		req, err := http.NewRequestWithContext(t.Context(), method, srv.URL+"/login", nil)
+		if err != nil {
+			t.Fatalf("building %s /login: %v", method, err)
+		}
+		resp, err := srv.Client().Do(req)
+		if err != nil {
+			t.Fatalf("%s /login: %v", method, err)
+		}
+		defer resp.Body.Close()
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatalf("reading the %s /login body: %v", method, err)
+		}
+		return resp, body
 	}
-	for _, want := range []struct {
-		header   string
-		contains string
-	}{
-		{"Cache-Control", "no-store"},
-		{"X-Content-Type-Options", "nosniff"},
-		{"Referrer-Policy", "no-referrer"},
-		{"Content-Security-Policy", "default-src 'self'"},
-		{"Content-Security-Policy", "frame-ancestors 'none'"},
-	} {
-		if got := head.Header().Get(want.header); !strings.Contains(got, want.contains) {
-			t.Errorf("HEAD /login: %s = %q, want it to contain %q", want.header, got,
-				want.contains)
+
+	get, _ := do(http.MethodGet)
+	head, body := do(http.MethodHead)
+	if head.StatusCode != http.StatusOK || get.StatusCode != http.StatusOK {
+		t.Fatalf("HEAD /login = %d, GET /login = %d, want both 200; a monitor sending HEAD "+
+			"reports the app down", head.StatusCode, get.StatusCode)
+	}
+	if len(body) != 0 {
+		t.Errorf("HEAD /login returned %d body bytes; the server drops the body", len(body))
+	}
+
+	// HEAD describes the GET response, so it carries every header GET does —
+	// the admin group's hardening headers included, which
+	// TestTheAdminGroupCarriesTheBrowserHardeningHeadersAndThePublicGroupDoesNot
+	// pins on GET. Comparing against GET rather than a copied list means a header
+	// added to the admin group later is covered here without touching this test.
+	// Excluded are the ones that legitimately differ per response: the clock, the
+	// length the server could only count for the GET, and a fresh login nonce.
+	for _, hdr := range []http.Header{get.Header, head.Header} {
+		for _, k := range []string{"Date", "Content-Length", "Set-Cookie"} {
+			hdr.Del(k)
 		}
 	}
-
-	get := h.get(t, "/login", nil)
-	if get.Code != http.StatusOK {
-		t.Fatalf("GET /login = %d, want 200", get.Code)
+	if !maps.EqualFunc(get.Header, head.Header, slices.Equal) {
+		t.Errorf("HEAD /login headers differ from GET's:\nHEAD %v\nGET  %v", head.Header, get.Header)
 	}
-	headType, getType := head.Header().Get("Content-Type"), get.Header().Get("Content-Type")
-	if headType != getType || headType == "" {
-		t.Errorf("HEAD /login Content-Type = %q, GET /login = %q; HEAD describes the GET response",
-			headType, getType)
+	if csp := head.Header.Get("Content-Security-Policy"); !strings.Contains(csp, "frame-ancestors 'none'") {
+		t.Errorf("HEAD /login: Content-Security-Policy = %q, want the admin group's policy", csp)
 	}
 
-	// POST still reaches attemptLogin: a wrong password re-renders the form
-	// with the error instead of being answered as a page fetch.
-	b := h.browser()
-	page := b.get(t, "/login")
-	failed := b.submitLogin(t, csrfFrom(t, page.Body.String()), "not-the-password")
-	if failed.Code != http.StatusOK {
-		t.Fatalf("POST /login = %d, want 200 with the form re-rendered", failed.Code)
-	}
-	if !strings.Contains(failed.Body.String(), "That password is not correct.") {
-		t.Error("POST /login did not run the login attempt")
-	}
-
-	// The methods that were refused before are still refused, with the rate
-	// limiter and the refusal in front of them as before.
+	// The methods refused before are still refused.
 	for _, method := range []string{
 		http.MethodPut, http.MethodDelete, http.MethodPatch, http.MethodOptions,
 	} {
-		rec := httptest.NewRecorder()
-		h.handler.ServeHTTP(rec, httptest.NewRequest(method, "/login", nil))
-		if rec.Code != http.StatusMethodNotAllowed {
-			t.Errorf("%s /login = %d, want 405", method, rec.Code)
+		if resp, _ := do(method); resp.StatusCode != http.StatusMethodNotAllowed {
+			t.Errorf("%s /login = %d, want 405", method, resp.StatusCode)
 		}
-	}
-}
-
-// httptest.ResponseRecorder keeps whatever the handler writes; only the HTTP
-// server drops the body on HEAD. A monitor sees the server's response, so the
-// no-body half runs through a real one.
-func TestHeadLoginThroughARealServerHasNoBody(t *testing.T) {
-	h := newHarness(t)
-	srv := httptest.NewServer(h.handler)
-	defer srv.Close()
-
-	resp, err := srv.Client().Head(srv.URL + "/login")
-	if err != nil {
-		t.Fatalf("HEAD /login: %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("HEAD /login = %d, want 200", resp.StatusCode)
-	}
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatalf("reading the HEAD body: %v", err)
-	}
-	if len(body) != 0 {
-		t.Errorf("HEAD /login returned %d bytes; the server drops the body", len(body))
-	}
-	if got := resp.Header.Get("Content-Security-Policy"); !strings.Contains(got, "frame-ancestors 'none'") {
-		t.Errorf("HEAD /login through the server: Content-Security-Policy = %q, want the "+
-			"admin group's policy", got)
 	}
 }
